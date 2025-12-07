@@ -34,7 +34,7 @@ async function run() {
     await client.connect();
     const db = client.db("style_decor_db");
     const userCollection = db.collection("users");
-
+    const serviceCollection = db.collection("services");
     // add users
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -57,6 +57,12 @@ async function run() {
       const query = { email };
       const user = await userCollection.findOne(query);
       res.send({ role: user?.role || "user" });
+    });
+
+    app.post("/services", async (req, res) => {
+      const service = req.body;
+      const result = await serviceCollection.insertOne(service);
+      res.send(result);
     });
 
     // Connect the client to the server	(optional starting in v4.7)
