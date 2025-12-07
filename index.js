@@ -31,6 +31,25 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
+    await client.connect();
+    const db = client.db("style_decor_db");
+    const userCollection = db.collection("users");
+
+    // add users
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      user.role = "user";
+      user.createdAt = new Date();
+      const email = user.email;
+      const userExists = await userCollection.findOne({ email });
+
+      if (userExists) {
+        return res.send({ message: "user exists" });
+      }
+
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
