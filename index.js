@@ -50,6 +50,15 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+
+    // get user role
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      res.send({ role: user?.role || "user" });
+    });
+
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
