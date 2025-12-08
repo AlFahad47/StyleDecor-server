@@ -51,6 +51,32 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/users", async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    });
+    // to decorator
+    app.patch(
+      "/users/decorator/:id",
+
+      async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updatedDoc = { $set: { role: "decorator" } };
+        const result = await userCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    // to user
+    app.patch("/users/user/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = { $set: { role: "user" } };
+      const result = await userCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+
     // get user role
     app.get("/users/:email/role", async (req, res) => {
       const email = req.params.email;
