@@ -76,6 +76,25 @@ async function run() {
       const result = await serviceCollection.deleteOne(query);
       res.send(result);
     });
+    // update services
+    app.patch("/services/:id", async (req, res) => {
+      const item = req.body;
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          service_name: item.service_name,
+          category: item.category,
+          price: item.price,
+          unit: item.unit,
+          description: item.description,
+          //update image if provided
+          ...(item.img && { img: item.img }),
+        },
+      };
+      const result = await serviceCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
 
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
