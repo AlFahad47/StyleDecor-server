@@ -4,7 +4,7 @@ const app = express();
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const serviceAccount = require("./admin-key.json");
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 const crypto = require("crypto");
 
@@ -36,6 +36,7 @@ async function run() {
     const userCollection = db.collection("users");
     const serviceCollection = db.collection("services");
     const bookingCollection = db.collection("bookings");
+    const paymentCollection = db.collection("payments");
     // add users
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -187,6 +188,167 @@ async function run() {
 
       const result = await bookingCollection.insertOne(booking);
       res.send(result);
+    });
+
+    // get my bookings
+    app.get("/bookings", async (req, res) => {
+      const email = req.query.email;
+
+      if (!email) {
+        return res.send([]);
+      }
+
+      const query = { email };
+      const result = await bookingCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.get("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ error: "Invalid ID format" });
+      }
+
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingCollection.findOne(query);
+
+      res.send(result);
+    });
+    // cancel
+    app.patch("/bookings/:id", async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+
+      const updatedDoc = {
+        $set: {
+          status: "canceled",
+        },
+      };
+
+      const result = await bookingCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+
+    // payment apis
+    app.post("/payment-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      const amount = parseInt(paymentInfo.cost) * 100;
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: amount,
+              product_data: {
+                name: `Booking for: ${paymentInfo.serviceName}`,
+              },
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        // Pass necessary IDs for database update later
+        metadata: {
+          bookingId: paymentInfo.bookingId,
+          serviceName: paymentInfo.serviceName,
+        },
+        customer_email: paymentInfo.senderEmail,
+
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/my-bookings`,
+      });
+
+      res.send({ url: session.url });
+    });
+
+    app.patch("/payment-success", async (req, res) => {
+      try {
+        const sessionId = req.query.session_id;
+
+        if (!sessionId) {
+          return res
+            .status(400)
+            .send({ success: false, message: "Session ID is missing" });
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        if (!session) {
+          return res
+            .status(404)
+            .send({ success: false, message: "Session not found" });
+        }
+
+        const transactionId = session.payment_intent;
+        const bookingId = session.metadata?.bookingId;
+        const serviceName = session.metadata?.serviceName;
+
+        if (!bookingId) {
+          console.error("ERROR: Booking ID missing in Stripe Metadata");
+          return res
+            .status(400)
+            .send({ success: false, message: "Booking ID missing" });
+        }
+
+        const paymentExist = await paymentCollection.findOne({
+          transactionId: transactionId,
+        });
+
+        if (paymentExist) {
+          return res.send({
+            message: "already exists",
+            transactionId,
+            success: true,
+            paymentInfo: paymentExist,
+          });
+        }
+
+        if (session.payment_status === "paid") {
+          const bookingQuery = { _id: new ObjectId(bookingId) };
+
+          const bookingUpdate = {
+            $set: {
+              status: "paid",
+              transactionId: transactionId,
+            },
+          };
+
+          const updateResult = await bookingCollection.updateOne(
+            bookingQuery,
+            bookingUpdate
+          );
+
+          const payment = {
+            amount: session.amount_total / 100,
+            currency: session.currency,
+            customerEmail: session.customer_email,
+            bookingId: bookingId,
+            serviceName: serviceName,
+            transactionId: transactionId,
+            paymentStatus: session.payment_status,
+            paidAt: new Date(),
+          };
+
+          const paymentResult = await paymentCollection.insertOne(payment);
+
+          return res.send({
+            success: true,
+            modifyBooking: updateResult,
+            transactionId: transactionId,
+            paymentInfo: payment,
+          });
+        }
+
+        return res.send({
+          success: false,
+          message: "Payment status not 'paid'.",
+        });
+      } catch (error) {
+        console.error("Error in /payment-success:", error);
+        res.status(500).send({ success: false, error: error.message });
+      }
     });
 
     // Connect the client to the server	(optional starting in v4.7)
