@@ -17,7 +17,23 @@ admin.initializeApp({
 // middleware
 app.use(express.json());
 app.use(cors());
+const verifyToken = async (req, res, next) => {
+  const token = req.headers.authorization;
 
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.icmxc0o.mongodb.net/?appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -263,94 +279,122 @@ async function run() {
       res.send({ url: session.url });
     });
 
-    app.patch("/payment-success", async (req, res) => {
-      try {
-        const sessionId = req.query.session_id;
+    app.patch("/payment-success", verifyToken, async (req, res) => {
+      const sessionId = req.query.session_id;
 
-        if (!sessionId) {
-          return res
-            .status(400)
-            .send({ success: false, message: "Session ID is missing" });
-        }
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const transactionId = session.payment_intent;
 
-        if (!session) {
-          return res
-            .status(404)
-            .send({ success: false, message: "Session not found" });
-        }
+      const paymentExist = await paymentCollection.findOne({
+        transactionId: transactionId,
+      });
 
-        const transactionId = session.payment_intent;
-        const bookingId = session.metadata?.bookingId;
-        const serviceName = session.metadata?.serviceName;
-
-        if (!bookingId) {
-          console.error("ERROR: Booking ID missing in Stripe Metadata");
-          return res
-            .status(400)
-            .send({ success: false, message: "Booking ID missing" });
-        }
-
-        const paymentExist = await paymentCollection.findOne({
-          transactionId: transactionId,
+      if (paymentExist) {
+        return res.send({
+          message: "already exists",
+          transactionId,
+          success: true,
+          paymentInfo: paymentExist,
         });
+      }
 
-        if (paymentExist) {
-          return res.send({
-            message: "already exists",
-            transactionId,
-            success: true,
-            paymentInfo: paymentExist,
-          });
-        }
+      if (session.payment_status === "paid") {
+        const id = session.metadata.bookingId;
 
-        if (session.payment_status === "paid") {
-          const bookingQuery = { _id: new ObjectId(bookingId) };
+        const bookingQuery = { _id: new ObjectId(id) };
+        const bookingUpdate = {
+          $set: {
+            status: "paid",
+            transactionId: session.payment_intent,
+          },
+        };
+        const updateResult = await bookingCollection.updateOne(
+          bookingQuery,
+          bookingUpdate
+        );
 
-          const bookingUpdate = {
-            $set: {
-              status: "paid",
-              transactionId: transactionId,
-            },
-          };
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          bookingId: session.metadata.bookingId,
+          serviceName: session.metadata.serviceName,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+        };
 
-          const updateResult = await bookingCollection.updateOne(
-            bookingQuery,
-            bookingUpdate
-          );
-
-          const payment = {
-            amount: session.amount_total / 100,
-            currency: session.currency,
-            customerEmail: session.customer_email,
-            bookingId: bookingId,
-            serviceName: serviceName,
-            transactionId: transactionId,
-            paymentStatus: session.payment_status,
-            paidAt: new Date(),
-          };
-
-          const paymentResult = await paymentCollection.insertOne(payment);
-
-          return res.send({
-            success: true,
-            modifyBooking: updateResult,
-            transactionId: transactionId,
-            paymentInfo: payment,
-          });
-        }
+        const paymentResult = await paymentCollection.insertOne(payment);
 
         return res.send({
-          success: false,
-          message: "Payment status not 'paid'.",
+          success: true,
+          modifyBooking: updateResult,
+          transactionId: session.payment_intent,
+          paymentInfo: payment,
         });
-      } catch (error) {
-        console.error("Error in /payment-success:", error);
-        res.status(500).send({ success: false, error: error.message });
       }
+
+      return res.send({
+        success: false,
+        message: "Payment status not 'paid'.",
+      });
     });
 
+    app.get("/payments", verifyToken, async (req, res) => {
+      const queryEmail = req.query.email;
+      const decodedEmail = req.decoded_email;
+
+      if (queryEmail !== decodedEmail) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      const query = { customerEmail: queryEmail };
+      const result = await paymentCollection
+        .find(query)
+        .sort({ paidAt: -1 })
+        .toArray();
+      res.send(result);
+    });
+
+    // get decorators
+    app.get("/users/decorators", verifyToken, async (req, res) => {
+      const query = { role: "decorator" };
+
+      const result = await userCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.get("/admin/bookings", async (req, res) => {
+      const result = await bookingCollection.find().toArray();
+
+      res.send(result);
+    });
+
+    app.patch("/bookings/assign/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const { decoratorId } = req.body;
+      const filter = { _id: new ObjectId(id) };
+      const decorator = await userCollection.findOne({
+        _id: new ObjectId(decoratorId),
+      });
+
+      if (!decorator) {
+        return res.status(404).send({ message: "Decorator not found" });
+      }
+
+      const updatedDoc = {
+        $set: {
+          decoratorId: decoratorId,
+          decoratorName: decorator.displayName,
+          decoratorEmail: decorator.email,
+          status: "Assigned",
+        },
+      };
+
+      const result = await bookingCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
