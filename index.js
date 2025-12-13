@@ -53,6 +53,18 @@ async function run() {
     const serviceCollection = db.collection("services");
     const bookingCollection = db.collection("bookings");
     const paymentCollection = db.collection("payments");
+
+    const verifyDecorator = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "decorator") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
     // add users
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -395,6 +407,110 @@ async function run() {
       const result = await bookingCollection.updateOne(filter, updatedDoc);
       res.send(result);
     });
+    // get decorator assigned work
+    app.get(
+      "/bookings/decorator/:email",
+      verifyToken,
+      verifyDecorator,
+      async (req, res) => {
+        const email = req.params.email;
+
+        if (req.decoded_email !== email) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+
+        const query = { decoratorEmail: email };
+
+        const result = await bookingCollection.find(query).toArray();
+        res.send(result);
+      }
+    );
+
+    // update status of service work
+    app.patch(
+      "/bookings/status/:id",
+      verifyToken,
+      verifyDecorator,
+      async (req, res) => {
+        const id = req.params.id;
+        const { status } = req.body;
+        const filter = { _id: new ObjectId(id) };
+
+        const updatedDoc = {
+          $set: { status: status },
+        };
+
+        const result = await bookingCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    // decorator home states and history
+
+    app.get(
+      "/decorator-stats/:email",
+      verifyToken,
+      verifyDecorator,
+      async (req, res) => {
+        const email = req.params.email;
+
+        if (req.decoded_email !== email) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+
+        const query = { decoratorEmail: email };
+        const projects = await bookingCollection.find(query).toArray();
+
+        const totalProjects = projects.length;
+        const completedProjects = projects.filter(
+          (p) => p.status === "Completed"
+        ).length;
+        const ongoingProjects = projects.filter(
+          (p) => p.status !== "Completed" && p.status !== "Cancelled"
+        ).length;
+
+        const totalEarnings = projects
+          .filter((p) => p.status === "Completed")
+          .reduce((sum, p) => sum + (parseFloat(p.price) || 0), 0);
+
+        const paymentHistory = projects
+          .filter((p) => p.status === "Completed")
+          .map((p) => ({
+            serviceName: p.service_name,
+            date: p.date,
+            price: p.price,
+            customer: p.customerName,
+          }));
+
+        res.send({
+          totalProjects,
+          completedProjects,
+          ongoingProjects,
+          totalEarnings,
+          paymentHistory,
+        });
+      }
+    );
+    // decorators personal payments
+    app.get(
+      "/decorator-payments/:email",
+      verifyToken,
+      verifyDecorator,
+      async (req, res) => {
+        const email = req.params.email;
+
+        if (req.decoded_email !== email) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+
+        const query = {
+          decoratorEmail: email,
+        };
+
+        const result = await bookingCollection.find(query).toArray();
+        res.send(result);
+      }
+    );
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
