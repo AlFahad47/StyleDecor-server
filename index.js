@@ -65,6 +65,18 @@ async function run() {
 
       next();
     };
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
     // add users
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -511,6 +523,64 @@ async function run() {
         res.send(result);
       }
     );
+
+    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollection.estimatedDocumentCount();
+      const bookings = await bookingCollection.estimatedDocumentCount();
+      const services = await serviceCollection.estimatedDocumentCount();
+
+      const payments = await bookingCollection
+        .aggregate([
+          { $match: { status: { $in: ["paid", "Assigned", "Completed"] } } },
+          { $group: { _id: null, totalRevenue: { $sum: "$price" } } },
+        ])
+        .toArray();
+      const revenue = payments.length > 0 ? payments[0].totalRevenue : 0;
+
+      const serviceStats = await bookingCollection
+        .aggregate([
+          { $match: { status: { $ne: "Cancelled" } } },
+          {
+            $group: {
+              _id: "$service_name",
+              count: { $sum: 1 },
+              total: { $sum: "$price" },
+            },
+          },
+          { $project: { name: "$_id", count: 1, total: 1, _id: 0 } },
+        ])
+        .toArray();
+
+      const userBookingStats = await bookingCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$email",
+              bookingCount: { $sum: 1 },
+            },
+          },
+          { $sort: { bookingCount: -1 } },
+          { $limit: 10 },
+        ])
+        .toArray();
+
+      res.send({
+        users,
+        bookings,
+        services,
+        revenue,
+        serviceStats,
+        userBookingStats,
+      });
+    });
+
+    // home page
+    app.get("/public/decorators", async (req, res) => {
+      const query = { role: "decorator" };
+      // Fetch random 4 or top 4
+      const result = await userCollection.find(query).limit(4).toArray();
+      res.send(result);
+    });
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
