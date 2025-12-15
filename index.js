@@ -53,6 +53,7 @@ async function run() {
     const serviceCollection = db.collection("services");
     const bookingCollection = db.collection("bookings");
     const paymentCollection = db.collection("payments");
+    const contactCollection = db.collection("contacts");
 
     const verifyDecorator = async (req, res, next) => {
       const email = req.decoded_email;
@@ -581,6 +582,15 @@ async function run() {
       const result = await userCollection.find(query).limit(4).toArray();
       res.send(result);
     });
+
+    app.post("/contact", async (req, res) => {
+      const messageData = req.body;
+      messageData.date = new Date();
+
+      const result = await contactCollection.insertOne(messageData);
+      res.send(result);
+    });
+
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
