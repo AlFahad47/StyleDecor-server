@@ -578,7 +578,6 @@ async function run() {
     // home page
     app.get("/public/decorators", async (req, res) => {
       const query = { role: "decorator" };
-      // Fetch random 4 or top 4
       const result = await userCollection.find(query).limit(4).toArray();
       res.send(result);
     });
@@ -588,6 +587,16 @@ async function run() {
       messageData.date = new Date();
 
       const result = await contactCollection.insertOne(messageData);
+      res.send(result);
+    });
+
+    app.get("/users/profile/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      if (req.decoded_email !== email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const query = { email: email };
+      const result = await userCollection.findOne(query);
       res.send(result);
     });
 
