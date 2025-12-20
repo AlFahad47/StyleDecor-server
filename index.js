@@ -600,6 +600,31 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/user-stats/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+
+      if (req.decoded_email !== email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      const query = { email: email };
+      const userBookings = await bookingCollection.find(query).toArray();
+
+      const totalBookings = userBookings.length;
+      const pendingBookings = userBookings.filter(
+        (b) => b.status === "pending"
+      ).length;
+      const completedBookings = userBookings.filter(
+        (b) => b.status === "Completed"
+      ).length;
+
+      res.send({
+        totalBookings,
+        pendingBookings,
+        completedBookings,
+      });
+    });
+
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
   } finally {
