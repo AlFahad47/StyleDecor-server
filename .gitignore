@@ -1,3 +1,5 @@
 node_modules
 .env
 admin-key.json
+.vercel
+.env*.local

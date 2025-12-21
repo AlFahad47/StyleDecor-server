@@ -3,7 +3,14 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const serviceAccount = require("./admin-key.json");
+
+// const serviceAccount = require("./admin-key.json");
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decoded);
+
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 const crypto = require("crypto");
@@ -47,7 +54,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("style_decor_db");
     const userCollection = db.collection("users");
     const serviceCollection = db.collection("services");
@@ -61,6 +68,18 @@ async function run() {
       const user = await userCollection.findOne(query);
 
       if (!user || user.role !== "decorator") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
+
+    const verifyUser = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "user") {
         return res.status(403).send({ message: "forbidden access" });
       }
 
@@ -141,6 +160,8 @@ async function run() {
     // add services
     app.post("/services", verifyToken, verifyAdmin, async (req, res) => {
       const service = req.body;
+      service.createdByEmail = req.decoded_email;
+      service.createdAt = new Date();
       const result = await serviceCollection.insertOne(service);
       res.send(result);
     });
@@ -282,7 +303,7 @@ async function run() {
         line_items: [
           {
             price_data: {
-              currency: "usd",
+              currency: "bdt",
               unit_amount: amount,
               product_data: {
                 name: `Booking for: ${paymentInfo.serviceName}`,
@@ -393,8 +414,20 @@ async function run() {
     });
 
     app.get("/admin/bookings", verifyToken, verifyAdmin, async (req, res) => {
-      const result = await bookingCollection.find().toArray();
+      const sort = req.query.sort;
+      const order = req.query.order;
 
+      let sortOptions = {};
+
+      if (sort === "date") {
+        sortOptions = { date: order === "asc" ? 1 : -1 };
+      } else if (sort === "status") {
+        sortOptions = { status: order === "asc" ? 1 : -1 };
+      } else {
+        sortOptions = { _id: -1 };
+      }
+
+      const result = await bookingCollection.find().sort(sortOptions).toArray();
       res.send(result);
     });
 
@@ -633,7 +666,7 @@ async function run() {
     });
 
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
