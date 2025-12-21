@@ -167,26 +167,44 @@ async function run() {
     });
     // get services and search filter
     app.get("/services", async (req, res) => {
-      const { search, category, min, max } = req.query;
+      const { search, category, min, max, page, size } = req.query;
+
+      const pageNumber = parseInt(page) || 0;
+      const pageSize = parseInt(size) || 10;
+      const skip = pageNumber * pageSize;
+
       let query = {};
-
-      if (search) {
-        query.service_name = { $regex: search, $options: "i" };
-      }
-
-      if (category) {
-        query.category = category;
-      }
-
-      // price
+      if (search) query.service_name = { $regex: search, $options: "i" };
+      if (category && category !== "null") query.category = category;
       if (min || max) {
         query.price = {};
         if (min) query.price.$gte = parseFloat(min);
         if (max) query.price.$lte = parseFloat(max);
       }
 
-      const result = await serviceCollection.find(query).toArray();
+      const result = await serviceCollection
+        .find(query)
+        .skip(skip)
+        .limit(pageSize)
+        .toArray();
+
       res.send(result);
+    });
+    // for buttons count
+    app.get("/services-count", async (req, res) => {
+      const { search, category, min, max } = req.query;
+
+      let query = {};
+      if (search) query.service_name = { $regex: search, $options: "i" };
+      if (category && category !== "null") query.category = category;
+      if (min || max) {
+        query.price = {};
+        if (min) query.price.$gte = parseFloat(min);
+        if (max) query.price.$lte = parseFloat(max);
+      }
+
+      const count = await serviceCollection.countDocuments(query);
+      res.send({ count });
     });
     // delete services
     app.delete("/services/:id", verifyToken, verifyAdmin, async (req, res) => {
