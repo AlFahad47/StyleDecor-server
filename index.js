@@ -94,13 +94,15 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
     });
     // to decorator
     app.patch(
       "/users/decorator/:id",
+      verifyToken,
+      verifyAdmin,
 
       async (req, res) => {
         const id = req.params.id;
@@ -112,7 +114,7 @@ async function run() {
     );
 
     // to user
-    app.patch("/users/user/:id", async (req, res) => {
+    app.patch("/users/user/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const updatedDoc = { $set: { role: "user" } };
@@ -130,14 +132,14 @@ async function run() {
     });
 
     // get user role
-    app.get("/users/role/:email", async (req, res) => {
+    app.get("/users/role/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const query = { email };
       const user = await userCollection.findOne(query);
       res.send({ role: user?.role || "user" });
     });
     // add services
-    app.post("/services", async (req, res) => {
+    app.post("/services", verifyToken, verifyAdmin, async (req, res) => {
       const service = req.body;
       const result = await serviceCollection.insertOne(service);
       res.send(result);
@@ -166,14 +168,14 @@ async function run() {
       res.send(result);
     });
     // delete services
-    app.delete("/services/:id", async (req, res) => {
+    app.delete("/services/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await serviceCollection.deleteOne(query);
       res.send(result);
     });
     // update services
-    app.patch("/services/:id", async (req, res) => {
+    app.patch("/services/:id", verifyToken, verifyAdmin, async (req, res) => {
       const item = req.body;
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
@@ -205,7 +207,7 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/bookings", async (req, res) => {
+    app.post("/bookings", verifyToken, async (req, res) => {
       const booking = req.body;
 
       if (
@@ -244,7 +246,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/bookings/:id", async (req, res) => {
+    app.get("/bookings/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
 
       if (!ObjectId.isValid(id)) {
@@ -257,7 +259,7 @@ async function run() {
       res.send(result);
     });
     // cancel
-    app.patch("/bookings/:id", async (req, res) => {
+    app.patch("/bookings/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
 
@@ -272,7 +274,7 @@ async function run() {
     });
 
     // payment apis
-    app.post("/payment-checkout-session", async (req, res) => {
+    app.post("/payment-checkout-session", verifyToken, async (req, res) => {
       const paymentInfo = req.body;
       const amount = parseInt(paymentInfo.cost) * 100;
 
@@ -383,43 +385,48 @@ async function run() {
     });
 
     // get decorators
-    app.get("/users/decorators", verifyToken, async (req, res) => {
+    app.get("/users/decorators", verifyToken, verifyAdmin, async (req, res) => {
       const query = { role: "decorator" };
 
       const result = await userCollection.find(query).toArray();
       res.send(result);
     });
 
-    app.get("/admin/bookings", async (req, res) => {
+    app.get("/admin/bookings", verifyToken, verifyAdmin, async (req, res) => {
       const result = await bookingCollection.find().toArray();
 
       res.send(result);
     });
 
-    app.patch("/bookings/assign/:id", verifyToken, async (req, res) => {
-      const id = req.params.id;
-      const { decoratorId } = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const decorator = await userCollection.findOne({
-        _id: new ObjectId(decoratorId),
-      });
+    app.patch(
+      "/bookings/assign/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { decoratorId } = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const decorator = await userCollection.findOne({
+          _id: new ObjectId(decoratorId),
+        });
 
-      if (!decorator) {
-        return res.status(404).send({ message: "Decorator not found" });
+        if (!decorator) {
+          return res.status(404).send({ message: "Decorator not found" });
+        }
+
+        const updatedDoc = {
+          $set: {
+            decoratorId: decoratorId,
+            decoratorName: decorator.displayName,
+            decoratorEmail: decorator.email,
+            status: "Assigned",
+          },
+        };
+
+        const result = await bookingCollection.updateOne(filter, updatedDoc);
+        res.send(result);
       }
-
-      const updatedDoc = {
-        $set: {
-          decoratorId: decoratorId,
-          decoratorName: decorator.displayName,
-          decoratorEmail: decorator.email,
-          status: "Assigned",
-        },
-      };
-
-      const result = await bookingCollection.updateOne(filter, updatedDoc);
-      res.send(result);
-    });
+    );
     // get decorator assigned work
     app.get(
       "/bookings/decorator/:email",
